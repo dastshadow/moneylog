@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    ============================================================
+     UserMapper.xml —— user 表的真实 SQL 所在地
+    ============================================================
+     【复习】这个文件跟 UserMapper.java 靠两个"暗号"接头：
+        · namespace = 接口的全限定名
+        · <select id="xxx"> 的 xxx = 接口里的方法名
+     对不上就会报 Invalid bound statement (not found) —— Day1 我们亲手验证过。
+-->
+<mapper namespace="com.wuweiqiu.moneylog.mapper.UserMapper">
+
+    <!--
+        按用户名查用户（查不到返回 null）。
+        resultType="User" 用的是简写 —— 因为 application.yml 里的
+        type-aliases-package 已经配了 entity 包（Day8 踩过这个坑，还记得吗）。
+    -->
+    <select id="findByUsername" resultType="User">
+        SELECT id, username, password, nickname, created_at
+        FROM `user`
+        WHERE username = #{username}
+    </select>
+
+    <!--
+        按主键查用户。
+        单参数方法，参数名随便写（#{id} / #{value} 都行），
+        因为只有一个参数时 MyBatis 不挑名字。
+        （对照 Day7 讲的：**两个以上参数就必须加 @Param**）
+    -->
+    <select id="findById" resultType="User">
+        SELECT id, username, password, nickname, created_at
+        FROM `user`
+        WHERE id = #{id}
+    </select>
+
+    <!--
+        新增用户。
+
+        【回归知识点】useGeneratedKeys="true" keyProperty="id" 是干什么的？
+          它让 MyBatis 在 INSERT 完成后，把数据库生成的自增 id **回填**到你传进来的
+          user 对象上。Day3 讲过、Day5 用过。
+          今天为什么要它？因为注册成功后我们要立刻知道新用户 id（虽然当前没直接用），
+          而且以后"给新用户初始化一个默认账户"时必须用它。
+
+        【关于 `user` 的反引号】
+          反引号是 MySQL 里"标识符"的引用符号。`user` 在 MySQL 里是个关键字，
+          虽然它属于"非保留关键字"（不写反引号一般也能跑），但写上更保险、
+          也让读代码的人一眼知道"这是个表名，不是关键字"。
+    -->
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `user` (username, password, nickname)
+        VALUES (#{username}, #{password}, #{nickname})
+    </insert>
+
+</mapper>

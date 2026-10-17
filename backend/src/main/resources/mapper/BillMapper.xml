@@ -1,0 +1,385 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    ============================================================
+      账单映射文件
+    ============================================================
+    namespace 必须精确等于 BillMapper 接口的全限定名（老规矩）
+-->
+<mapper namespace="com.wuweiqiu.moneylog.mapper.BillMapper">
+
+    <!--
+        ============================================================
+          查询账单列表 —— 今天的新知识点：连表查询（JOIN）
+        ============================================================
+
+        【先看问题】
+          bill 表里存的是 account_id = 1，但页面上要显示"微信钱包"。
+          只查 bill 一张表，我们只能拿到一个数字 1，用户看不懂。
+
+        【解决办法】把 account 表"接"过来查
+          用 JOIN 关键字，让两张表按"外键关系"临时拼成一张大表，
+          就能在同一行里同时拿到账单信息和账户名称。
+
+        ============================================================
+          这条 SQL 逐段拆开读
+        ============================================================
+
+          SELECT b.id, b.account_id, b.type, b.amount, b.category,
+                 b.bill_date, b.remark, b.created_at,
+                 a.name AS account_name          ← 关键的一列！
+          FROM bill b                             ← b 是 bill 的"简称"
+          LEFT JOIN account a ON b.account_id = a.id   ← 接起来的条件
+          ORDER BY b.bill_date DESC, b.id DESC
+
+        【① b 和 a 是什么？—— 表别名】
+          写 `bill b` 意思是"给 bill 表起个小名叫 b"。
+          这样后面就不用反复写完整的表名，而且两张表都有 id、name 字段，
+          用 b.id 和 a.id 才能区分清楚是哪张表的。
+          （不加别名的话，SQL 会报"字段名有歧义"的错误，因为它不知道你指哪个 id。）
+
+        【② ON b.account_id = a.id 是什么？—— 连接条件】
+          这句话是 JOIN 的核心，翻译成人话：
+            "把 bill 表里每一行的 account_id，
+              去 account 表里找 id 相同的那些行，配成一对。"
+          配上的部分拼成一行，就能同时看到账单和账户信息了。
+          这个连接条件，用的正是你建表时定义的那条外键关系。
+
+        【③ 为什么用 LEFT JOIN 而不是 JOIN？】
+          先理解区别：
+            · JOIN（内连接）      —— 只保留"两边都配得上"的行。
+                                     如果一条账单的 account_id 找不到对应账户，这行**直接消失**。
+            · LEFT JOIN（左连接） —— 保留左表（bill）的**所有行**。
+                                     右表配不上时，右表的字段给 null，但左表的行还在。
+
+          【这里必须用 LEFT JOIN 的原因】
+            如果用内连接，万一某条账单的账户被删了（或者数据有问题），
+            这条账单会在列表里**凭空消失** —— 用户明明记过一笔账，却找不到了，
+            而且没有任何提示。这种"数据静默丢失"是最难排查的问题。
+            用 LEFT JOIN，账单一定还在，只是 account_name 显示为空，
+            我们能在页面上用"-"或者"已删除账户"标出来，用户至少知道它存在。
+
+          【一句话记住】
+            LEFT JOIN 更"保守"，宁可多留一行空着的，也不悄悄弄丢数据。
+            这也是大多数业务查询的默认选择。
+
+        ============================================================
+        【④ 结果怎么变成 Java 对象的？—— 别名与驼峰映射】
+        ============================================================
+          SQL 查出来的列名是 account_name（带下划线），
+          而 Java 里字段叫 accountName（驼峰）。
+
+          它能自动对应上，靠的还是 application.yml 里那行配置：
+              map-underscore-to-camel-case: true
+          这就是 Day1 讲过的那个"驼峰映射"，今天在连表查询里又用上了。
+
+          【注意】：b.id、b.account_id 这些前缀不会被带到结果列名里，
+          结果列名就是 id、account_id（不带 b.），所以照样能正常映射。
+
+        ============================================================
+        【⑤ ORDER BY 为什么用"倒序"？】
+        ============================================================
+          bill_date DESC, id DESC 表示：
+            先按账单日期倒序（新的在前）
+            日期相同的，再按 id 倒序（后记的在前）
+          记账应用都是"最近的账在最上面"，所以倒序是符合直觉的。
+
+          DESC = 降序（大到小）；ASC = 升序（小到大，默认值，可以不写）
+    -->
+    <select id="findAll" resultType="Bill">
+        SELECT b.id, b.user_id, b.account_id, b.type, b.amount, b.category,
+               b.bill_date, b.remark, b.created_at,
+               a.name AS account_name
+        FROM bill b
+        LEFT JOIN account a ON b.account_id = a.id
+        <!--
+            【Day11 加的这一行】只查"我的"账单。
+
+            【为什么条件挂在 b（bill）上，而不是 a（account）上？】
+              两种写法都对（因为账单的归属和它所属账户的归属必然一致）。
+              挂在 b.user_id 上更直接，也更快 —— 我们刚给这一列建了索引 idx_user_id。
+
+            【顺便】LEFT JOIN 那一步不用再加 user_id 条件：
+              能查出来的账单已经确定是我的了，而它关联的账户必然也是我的
+              （记账时校验过账户归属，见 BillService.create）。
+        -->
+        WHERE b.user_id = #{userId}
+        ORDER BY b.bill_date DESC, b.id DESC
+    </select>
+
+    <!--
+        ============================================================
+          新增账单
+        ============================================================
+        和 Account 的 insert 结构一样：
+          · 不写 id（AUTO_INCREMENT 自动生成）
+          · 不写 created_at（DEFAULT CURRENT_TIMESTAMP 自动盖时间）
+          · 用了 useGeneratedKeys 把新 id 回填到对象上
+
+        【注意这里没有 account_name】
+          因为表里根本没这一列 —— 它是连表查出来的"虚拟列"，
+          只在查询结果里存在，不能往数据库写。
+          这也印证了 Bill 实体类里那句话："表里没有的字段也允许存在"。
+    -->
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        <!--
+            【Day11 改动】多插了一列 user_id。
+              值来自 #{userId} —— 也就是 Bill 对象里的 userId 属性，
+              **由 Service 强制设置**（bill.setUserId(当前登录用户)），不是前端传的。
+              原因和 Account 那边完全一样：防止有人在 JSON 里写 "userId":2
+              把账记到别人头上。
+        -->
+        INSERT INTO bill (user_id, account_id, type, amount, category, bill_date, remark)
+        VALUES (#{userId}, #{accountId}, #{type}, #{amount}, #{category}, #{billDate}, #{remark})
+    </insert>
+
+    <!--
+        ============================================================
+          【Day8】统计一：按分类汇总
+        ============================================================
+
+            SELECT category,
+                   SUM(amount) AS total,
+                   COUNT(*)    AS billCount
+            FROM bill
+            WHERE type = #{type}
+              AND DATE_FORMAT(bill_date, '%Y-%m') = #{month}
+            GROUP BY category
+            ORDER BY total DESC
+
+        ============================================================
+          ① GROUP BY 是什么？—— 今天最重要的概念
+        ============================================================
+        在这之前，我们的查询都是"一行进、一行出"：
+            SELECT * FROM bill          → 有几条账单就返回几行
+
+        而 GROUP BY 做的事情是"**先分组，再对每组算一个数**"：
+
+            原始数据（假设）：
+                餐饮  35.00
+                餐饮  50.00
+                交通  25.50
+                交通  30.01
+                购物  88.00
+
+            GROUP BY category 之后，变成三组：
+                餐饮组：[35.00, 50.00]
+                交通组：[25.50, 30.01]
+                购物组：[88.00]
+
+            然后 SUM(amount) 对每一组求和：
+                餐饮  85.00
+                交通  55.51
+                购物  88.00
+
+        【要记住的规则】SELECT 后面的列，除了被聚合函数包起来的，
+          其他每一个都必须出现在 GROUP BY 里。
+          为什么？因为分组之后一组有多行，"category"每组只有一个值（好办），
+          但"amount"每组有多个值 —— 直接 SELECT amount 数据库不知道该给哪个。
+
+          所以这样写会报错：
+              SELECT category, amount FROM bill GROUP BY category   ❌
+          必须这样（聚合起来）：
+              SELECT category, SUM(amount) FROM bill GROUP BY category  ✓
+
+        ============================================================
+          ② DATE_FORMAT(bill_date, '%Y-%m') —— 把"日期"截成"年月"
+        ============================================================
+          bill_date 存的是完整的 '2026-10-11'。
+          但我们想按"月"统计，所以要把"日"去掉：
+              DATE_FORMAT('2026-10-11', '%Y-%m')  →  '2026-10'
+              DATE_FORMAT('2026-10-05', '%Y-%m')  →  '2026-10'   ← 同一个月，归到一组
+
+          【格式符号的含义】
+              %Y  四位年份（2026）
+              %m  两位月份（10）
+              %d  两位日期（11）
+          这三个是 MySQL 的写法，别的数据库不一样（比如 Oracle 用 TO_CHAR）。
+
+        ============================================================
+          ③ 为什么 WHERE 里要用 DATE_FORMAT 而不是直接比日期？
+        ============================================================
+          两种写法都能实现"筛某个月"，但含义不同：
+
+            写法A（我们用）  WHERE DATE_FORMAT(bill_date,'%Y-%m') = '2026-10'
+            写法B            WHERE bill_date >= '2026-10-01' AND bill_date < '2026-11-01'
+
+          【重要区别：性能】
+            写法A 对 bill_date 这一列**做了函数运算**，所以数据库用不上
+            idx_bill_date 这个索引（Day6 建表时加的那个），只能逐行算 —— 表大了会慢。
+            写法B 是"范围比较"，能正常走索引。
+
+          【为什么我们现在还用写法A？】
+            因为可读性更好、也更不容易写错月份边界。
+            等以后数据量大了、真的遇到慢查询时，再改成写法B
+            （这类优化叫"**避免在索引列上做运算**"，是个高频面试点，
+              你先记住有这回事，以后做性能优化时会用到）。
+
+        ============================================================
+          ④ SUM(amount) 和 COUNT(*) 的配合
+        ============================================================
+            SUM(amount)  把这一组所有的金额加起来
+            COUNT(*)     数这一组有几条记录
+          两个一起用，前端就能显示"餐饮 85.00 元（3笔）"这种信息。
+
+          注意返回类型的对应（在 CategoryStats.java 里定义）：
+            SUM 出来的是 DECIMAL → Java 里用 BigDecimal
+            COUNT 出来的是整数    → Java 里用 Integer
+
+        ============================================================
+          ⑤ ORDER BY total DESC —— 排序用的是"别名"
+        ============================================================
+          SQL 执行顺序上是"先算 SELECT 里的东西，再排序"，
+          所以 ORDER BY 里可以直接用 SELECT 定义的别名 total。
+          从大到小排，前端画饼图时顺序漂亮，也一眼看出哪类花得最多。
+        ============================================================
+    -->
+    <select id="sumByCategory" resultType="CategoryStats">
+        SELECT category,
+               SUM(amount) AS total,
+               COUNT(*)    AS billCount
+        FROM bill
+        <!-- 【Day11】只统计我的账单 -->
+        WHERE user_id = #{userId}
+          AND type = #{type}
+          AND DATE_FORMAT(bill_date, '%Y-%m') = #{month}
+        GROUP BY category
+        ORDER BY total DESC
+    </select>
+
+    <!--
+        ============================================================
+          【Day8】统计二：按月汇总收支
+        ============================================================
+
+            SELECT DATE_FORMAT(bill_date, '%Y-%m') AS month,
+                   SUM(CASE WHEN type = 1 THEN amount ELSE 0 END) AS expense,
+                   SUM(CASE WHEN type = 2 THEN amount ELSE 0 END) AS income
+            FROM bill
+            GROUP BY DATE_FORMAT(bill_date, '%Y-%m')
+            ORDER BY month ASC
+
+        ============================================================
+          ① 关键技巧：SUM(CASE WHEN ... THEN ... ELSE 0 END)
+        ============================================================
+          需求是"每个月，支出多少、收入多少"——两个数字要在同一行里。
+
+          最直接的想法是查两次（一次查支出、一次查收入），再在 Java 里合并。
+          但那样要写两条 SQL、还要按月份对上，很麻烦。
+
+          更好的办法是**在一次扫描里同时算出来**：
+
+              SUM(CASE WHEN type = 1 THEN amount ELSE 0 END)
+                  ↑遇到支出就取金额，遇到收入就取 0 → 加起来就是"支出合计"
+
+              SUM(CASE WHEN type = 2 THEN amount ELSE 0 END)
+                  ↑反过来 → 加起来就是"收入合计"
+
+          举个具体例子，假设10月有三条：
+              type=1  35.00    → 第一个SUM取 35.00，第二个取 0
+              type=1  25.50    → 第一个SUM取 25.50，第二个取 0
+              type=2 500.00    → 第一个SUM取 0，    第二个取 500.00
+              ─────────────────────────────────────────────────
+              结果：expense = 60.50，income = 500.00  ✓
+
+          这个技巧叫「**条件聚合**」，做报表时天天用 ——
+          它的价值是"**一次扫描出多个维度的统计**"，比查好几次快得多。
+          （你也可以想成"用行转列的方式把数据摊开"。）
+
+        ============================================================
+          ② GROUP BY 的写法
+        ============================================================
+          这里 GROUP BY 后面又写了一遍 DATE_FORMAT(...)，
+          而不是写别名 month。为什么？
+
+            在 MySQL 里写 GROUP BY month 通常是**可以**的（它允许用别名），
+            但这不是标准 SQL —— 在 PostgreSQL、Oracle 里会报错。
+
+          所以**写完整表达式是更保险的习惯**，换数据库不用改。
+          （这些小差异就是"SQL 方言"，不同数据库有些细节不一样。）
+
+        ============================================================
+          ③ ORDER BY month ASC —— 趋势图要"从早到晚"
+        ============================================================
+          折线图/柱状图的横轴是从左到右，所以月份要**升序**，
+          这样图看起来才是"时间在往前走"。
+          （对比：账单列表用的是 DESC，因为列表是"新的在最上面"。
+            同一个字段，在不同场景下排序方向不同 —— 看用户想怎么读。）
+        ============================================================
+    -->
+    <select id="sumByMonth" resultType="MonthlyStats">
+        SELECT DATE_FORMAT(bill_date, '%Y-%m') AS month,
+               SUM(CASE WHEN type = 1 THEN amount ELSE 0 END) AS expense,
+               SUM(CASE WHEN type = 2 THEN amount ELSE 0 END) AS income
+        FROM bill
+        <!--
+            【Day11】这个 WHERE 是**新加**的 —— 以前这里根本没有 WHERE，
+              意思是"统计所有人的所有账"。
+              这正是最容易被漏掉的那种："看代码时觉得它是个汇总，跟归属没关系"，
+              但它读的是所有人的数据。
+        -->
+        WHERE user_id = #{userId}
+        GROUP BY DATE_FORMAT(bill_date, '%Y-%m')
+        ORDER BY month ASC
+    </select>
+
+    <!--
+        ============================================================
+          【Day8】统计三：某个月的收支汇总
+        ============================================================
+
+            SELECT IFNULL(SUM(CASE WHEN type=1 THEN amount ELSE 0 END),0) AS totalExpense,
+                   IFNULL(SUM(CASE WHEN type=2 THEN amount ELSE 0 END),0) AS totalIncome,
+                   COUNT(*) AS billCount
+            FROM bill
+            WHERE DATE_FORMAT(bill_date,'%Y-%m') = #{month}
+
+        ============================================================
+          ① 注意：没有 GROUP BY，因为只要"这一整月"这一个汇总
+        ============================================================
+          带 GROUP BY 是"分成多组各算一个"；
+          不带 GROUP BY 是"整个结果集算一个"——
+          所以它**永远只返回一行**。
+
+          这就是为什么 Mapper 方法的返回值是 SummaryStats（一个对象），
+          而不是 List<SummaryStats>。（回顾 Day5 讲过的"返回值要如实反映数据形状"）
+
+        ============================================================
+          ② IFNULL(..., 0) 是干什么的？—— 这个很重要
+        ============================================================
+          如果某个月**一条账单都没有**，SUM 会返回什么？
+          答案是 **NULL**（不是 0）。因为"对空集合求和"数学上没有定义。
+
+          如果不处理，前端就会拿到 null，然后：
+              null.toFixed(2)  →  报错崩溃
+              或者显示成 "¥ null"
+
+          IFNULL(x, 0) 的意思是"如果 x 是 NULL 就换成 0"，
+          于是空月份会干净地返回 0.00。
+
+          【通用原则】**聚合函数遇到空集合会返回 NULL，
+            返回值给前端之前，一定要在 SQL 或 Java 里兜成 0。**
+          这类"null 引发的连锁崩溃"是新手最常见的 bug 来源之一。
+
+        ============================================================
+          ③ COUNT(*) 在空月份时会返回 0（不是 NULL）
+        ============================================================
+          这是 COUNT 和 SUM 的一个区别：
+              COUNT 数的是"有几行"，没有行就是 0 —— 它的意思是明确的；
+              SUM   要"把值加起来"，没有值可加 —— 所以给 NULL。
+          记住这个区别，能省很多调试时间。
+        ============================================================
+    -->
+    <select id="sumByMonthSummary" resultType="SummaryStats">
+        SELECT IFNULL(SUM(CASE WHEN type = 1 THEN amount ELSE 0 END), 0) AS totalExpense,
+               IFNULL(SUM(CASE WHEN type = 2 THEN amount ELSE 0 END), 0) AS totalIncome,
+               COUNT(*) AS billCount
+        FROM bill
+        <!-- 【Day11】只统计我的账单 -->
+        WHERE user_id = #{userId}
+          AND DATE_FORMAT(bill_date, '%Y-%m') = #{month}
+    </select>
+
+</mapper>

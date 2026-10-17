@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+        继承 Spring Boot 官方父项目。
+        好处：所有依赖的版本号都由它统一管理（这叫"依赖版本仲裁"），
+              我们自己不用逐个写版本号，避免版本冲突。
+    -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.5.15</version>
+        <relativePath/> <!-- 空标签 = 去远程仓库下载父项目，不要去上级目录找 -->
+    </parent>
+
+    <!-- 项目身份三件套（相当于身份证） -->
+    <groupId>com.wuweiqiu</groupId>
+    <artifactId>moneylog</artifactId>
+    <version>0.0.1-SNAPSHOT</version> <!-- SNAPSHOT 表示"开发中的版本" -->
+    <name>moneylog</name>
+    <description>个人记账本</description>
+
+    <properties>
+        <!-- 告诉 Maven 用 JDK 21 编译 -->
+        <java.version>21</java.version>
+        <mybatis.starter.version>3.0.5</mybatis.starter.version>
+        <!--
+            【Day9 新增】JWT 库的版本。
+            为什么要单独抽成一个属性？因为 jjwt 要引 3 个坐标（api/impl/jackson），
+            版本必须完全一致，抽成属性后只改一处即可。
+        -->
+        <jjwt.version>0.12.7</jjwt.version>
+    </properties>
+
+    <dependencies>
+        <!-- 零件1：Web —— 带来内嵌 Tomcat + Spring MVC，让项目能接收 HTTP 请求 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!--
+            零件2：MyBatis —— 让 Mapper 接口能自动变成可注入的 Bean
+            注意：必须用 3.0.x。2.x 系列只适配 Spring Boot 2.x，在 Boot 3 下会报
+                 NoSuchMethodError: addMappedStatement 之类的错
+        -->
+        <dependency>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter</artifactId>
+            <version>${mybatis.starter.version}</version>
+        </dependency>
+
+        <!--
+            零件3：MySQL 驱动 —— Java 和 MySQL 之间的"翻译官"
+            注意 groupId 是 com.mysql（新坐标），老教程里的 mysql:mysql-connector-java 已废弃
+            版本不写 = 由父项目决定
+        -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!--
+            ================================================================
+            【Day9 新增】零件5：密码加密工具
+            ================================================================
+            里面有个 BCryptPasswordEncoder，专门用来把密码"单向加密"成密文。
+            为什么不用 spring-boot-starter-security（整个安全框架）？
+              因为那一整套会自动把项目所有接口都锁起来，得配一堆东西才能跑通，
+              对新手来说噪音太大。我们只要"加密"这一个能力，就只引这一个零件。
+            版本不写 = 由 Spring Boot 父项目统一管理。
+        -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+
+        <!--
+            ================================================================
+            【Day9 新增】零件6/7/8：JWT（JSON Web Token）三件套
+            ================================================================
+            为什么要 3 个坐标？这是 jjwt 的设计：API 与实现分离
+              · jjwt-api     —— 我们代码里 import 的接口（编译期需要）
+              · jjwt-impl    —— 真正的实现（运行期需要）
+              · jjwt-jackson —— 负责把 JSON 和 Java 对象互转（运行期需要）
+            看起来繁琐，但能保证：升级实现时我们的代码不用动。
+        -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>${jjwt.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- 零件4：测试 —— 现在用不上，先放着，后面写单元测试要用 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- 让我们能用 mvn spring-boot:run 启动，将来也能打成可执行 jar -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

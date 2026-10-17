@@ -1,0 +1,69 @@
+# ============================================================
+#  项目参数表 —— 所有"可变的配置"都放这里，不要写死在 Java 代码里
+#  改配置不用重新编译代码，这是 Spring Boot 的核心思想之一
+# ============================================================
+
+server:
+  port: 8080        # 服务端口，浏览器访问 http://localhost:8080
+
+spring:
+  application:
+    name: moneylog
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 注意：整串 URL 用双引号包住。
+    # 因为 YAML 里 & 和 ? 有特殊含义，不加引号容易被误解析
+    # URL 里每个参数都有存在的原因，见下方说明，删任何一个都会报错：
+    #   serverTimezone=Asia/Shanghai    -> 不加会报 "The server time zone value ... is unrecognized"
+    #   allowPublicKeyRetrieval=true    -> MySQL8 默认加密方式下，不加会报 "Public Key Retrieval is not allowed"
+    #   useSSL=false                    -> 不加控制台会刷一大片 SSL 警告
+    #   characterEncoding=utf8          -> 中文写入可能乱码
+    url: "jdbc:mysql://localhost:3306/moneylog?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false"
+    username: root
+    password: "123456"   # TODO 换成你自己的 MySQL 密码
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml              # 去哪找写 SQL 的 XML 文件
+  # 【Day8 修改】原来只配了 entity 包，今天加了 vo 包
+  #   多个包用**英文逗号**分隔，不能有空格
+  #   不配的话，XML 里写 resultType="CategoryStats" 会报：
+  #     Could not resolve type alias 'CategoryStats'.
+  #     Cause: ClassNotFoundException: Cannot find class: CategoryStats
+  #   这正是 Day1 讲过的"别名机制"—— 只有被这个配置覆盖到的包，类名才能简写
+  type-aliases-package: com.wuweiqiu.moneylog.entity,com.wuweiqiu.moneylog.vo
+  configuration:
+    map-underscore-to-camel-case: true                  # 关键！让表字段 created_at 自动映射到 Java 属性 createdAt
+
+# ------------------------------------------------------------
+# 【Day9 新增】JWT 相关配置
+# ------------------------------------------------------------
+# 为什么密钥要写在这里、而不是写死在 JwtUtil 的代码里？
+#   因为代码要提交到 Git 仓库，任何人 clone 下来都能看到密钥。
+#   密钥泄露 = 别人可以用它伪造 token = 可以冒充任何用户登录你的系统。
+#   放进配置文件后，真实项目里还会进一步用"环境变量"覆盖它：
+#       java -jar moneylog.jar --moneylog.jwt.secret=xxxxx
+#   这样生产环境的密钥就不会进代码库了。
+#
+# 【换密钥的后果】所有已发出的 token 立刻全部失效（因为验签失败）。
+#   好消息：这就是"强制所有人重新登录"的标准做法 😄
+moneylog:
+  jwt:
+    # HS256 算法要求密钥至少 32 字节（256 位），太短会抛 WeakKeyException。
+    # 这串是开发用的，正式上线必须换成一串随机生成的、别人猜不到的。
+    secret: "moneylog-dev-secret-key-DO-NOT-USE-IN-PRODUCTION-2026-please-change-me"
+    # token 有效期（小时）。到期后接口会返回"登录已失效，请重新登录"。
+    expire-hours: 24
+
+# ------------------------------------------------------------
+# SQL 日志：这是你以后最常用的"排错武器"
+# 把 mapper 包设为 debug，MyBatis 就会把真正执行的 SQL 和参数打到控制台
+# ------------------------------------------------------------
+logging:
+  # 日志同时写一份到文件。为什么需要？
+  #   控制台日志有两个毛病：① 窗口一关就没了 ② 滚太快，翻不回去
+  #   写成文件就能随时打开、还能 Ctrl+F 搜索
+  file:
+    name: logs/moneylog.log     # 相对项目根目录，即 D:\dev\moneylog\logs\moneylog.log
+  level:
+    com.wuweiqiu.moneylog.mapper: debug
